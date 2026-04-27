@@ -1,0 +1,75 @@
+spring:
+  devtools:
+    restart:
+      enabled: false
+      additional-paths: src/main/java
+      exclude: static/**,templates/**
+  application:
+    name: thumb-backend
+  mvc:
+    servlet:
+      path: /api
+  # Tomcat 线程池优化
+  tomcat:
+    threads:
+      max: 1000
+      min-spare: 200
+    max-connections: 10000
+    accept-count: 1000
+  data:
+    redis:
+      database: 0
+      host: 192.168.192.130
+      password:
+      timeout: 3000
+      port: 6379
+      lettuce:
+        pool:
+          max-active: 500
+          max-idle: 100
+          min-idle: 50
+          max-wait: 3000ms
+  datasource:
+    url: jdbc:mysql://192.168.192.130:4000/thumb_db
+    username: root
+    password:
+    hikari:
+      maximum-pool-size: 100
+      minimum-idle: 20
+      connection-timeout: 10000
+      idle-timeout: 300000
+      max-lifetime: 600000
+  session:
+    timeout: 86400s
+    redis:
+      serializer-type: json
+  pulsar:
+    producer:
+      batching-enabled: true
+      batching-max-messages: 1000
+      batching-max-publish-delay: 5ms
+      batching-max-size: 131072
+      compression-type: LZ4
+      send-timeout: 5000ms
+    client:
+      service-url: pulsar://192.168.192.130:6650
+    listener:
+      concurrency: 10
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: false
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+    rewriteBatchedStatements: true
+
+# 整合 Prometheus + Grafana
+#management:
+#  endpoints:
+#    web:
+#      exposure:
+#        include: health, prometheus
+#  metrics:
+#    distribution:
+#      percentiles:
+#        http:
+#          server:
+#            requests: 0.5, 0.75, 0.9, 0.95, 0.99
