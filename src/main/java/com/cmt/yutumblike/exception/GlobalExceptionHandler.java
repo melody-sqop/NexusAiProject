@@ -41,7 +41,7 @@ public class GlobalExceptionHandler {
 
     /**
      * 参数校验失败
-     * @param e
+     * @param e 具体校验失败的异常
      * @return
      */
     @ExceptionHandler(MethodArgumentNotValidException.class)

@@ -1,4 +1,20 @@
 spring:
+  # Spring AI 配置 (以阿里云百炼为例，通常兼容 OpenAI 格式)
+  ai:
+    openai:
+      api-key: sk-571293b31f4d43efb883baef316b0b11
+      base-url: https://dashscope.aliyuncs.com/compatible-mode
+      chat:
+        options:
+          model: qwen3.6-plus # 你想用的模型
+          temperature: 0.1 # 温度越低随机性越低 内容审核不需要高随机性
+          response-format:
+            type: json_object # 响应格式 让模型返回 JSON 而不是返回markdown
+  # 自定义审核配置
+  audit:
+    max-retry-times: 3 # 最大重试次数
+
+
   devtools:
     restart:
       enabled: false
@@ -57,9 +73,14 @@ spring:
       concurrency: 10
 mybatis-plus:
   configuration:
-    map-underscore-to-camel-case: false
+    map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
     rewriteBatchedStatements: true
+
+
+# 自定义审核配置
+audit:
+  max-retry-times: 3 # 最大重试次数
 
 # 整合 Prometheus + Grafana
 #management:
