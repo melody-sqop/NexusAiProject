@@ -4,6 +4,7 @@ import com.cmt.yutumblike.common.BaseResponse;
 import com.cmt.yutumblike.common.ResultUtils;
 import io.swagger.v3.oas.annotations.Hidden;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -36,6 +37,18 @@ public class GlobalExceptionHandler {
         else {
             return ResultUtils.error(500, msg);
         }
+    }
+
+    /**
+     * 参数校验失败
+     * @param e
+     * @return
+     */
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public BaseResponse<?> handleValidationException(MethodArgumentNotValidException e) {
+        // 获取第一个校验失败的提示信息
+        String errorMsg = e.getBindingResult().getFieldError().getDefaultMessage();
+        return ResultUtils.error(400,errorMsg);
     }
 
 }

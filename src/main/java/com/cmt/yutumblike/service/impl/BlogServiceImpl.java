@@ -5,15 +5,15 @@ import cn.hutool.core.util.ObjUtil;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.cmt.yutumblike.constant.ThumbConstant;
 import com.cmt.yutumblike.mapper.BlogMapper;
+import com.cmt.yutumblike.model.dto.BlogCreateDTO;
 import com.cmt.yutumblike.model.entity.Blog;
-import com.cmt.yutumblike.model.entity.Thumb;
-import com.cmt.yutumblike.model.entity.User;
 import com.cmt.yutumblike.model.vo.BlogVO;
 import com.cmt.yutumblike.service.BlogService;
 import com.cmt.yutumblike.service.ThumbService;
 import com.cmt.yutumblike.service.UserService;
+import com.cmt.yutumblike.util.SecurityUtil;
 import jakarta.annotation.Resource;
-import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -22,7 +22,6 @@ import org.springframework.stereotype.Service;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -39,68 +38,93 @@ public class BlogServiceImpl
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
-    @Override
-    public BlogVO getBlogVOById(long blogId, HttpServletRequest request) {
-        Blog blog = this.getById(blogId);
-        User loginUser = userService.getLoginUser(request);
-        return this.getBlogVO(blog, loginUser);
-    }
 
     /**
-     * 获取博客列表
-     * @param blogList 博客列表
-     * @param request 请求
+     * 根据博客id获取某个博客详细 登录用户则查点赞状态 未登录不查
+     * @param blogId 博客id
      * @return
      */
     @Override
-    public List<BlogVO> getBlogVOList(List<Blog> blogList, HttpServletRequest request) {
-        // 1. 获取当前登录的用户
-        User loginUser = userService.getLoginUser(request);
+    public BlogVO getBlogVOById(long blogId) {
+        // 1. 从数据库查博客
+        Blog blog = this.getById(blogId);
 
-        // 2. 创建一个Map：key=博客id，value=是否点赞（true/false）
-        // 用来存「当前用户都给哪些博客点过赞」
+        // 2. 拷贝基础属性到 VO
+        BlogVO blogVO = BeanUtil.copyProperties(blog, BlogVO.class);
+
+        // 3. 拿当前登录用户ID
+        Long userId = SecurityUtil.getCurrentUserId();
+
+        // 4. 你的核心逻辑：没登录直接返回，登录了查点赞
+        if (userId != null) {
+            Boolean hasThumb = thumbService.hasThumb(blogId, userId);
+            blogVO.setHasThumb(hasThumb);
+        }
+
+        // 5. 返回结果
+        return blogVO;
+    }
+
+    @Override
+    public List<BlogVO> getBlogVOList(List<Blog> blogList) {
+        // 1. 从 Security 上下文直接拿 userId
+        Long userId = SecurityUtil.getCurrentUserId();
+
+        // 2. 创建 Map：key=博客id，value=是否点赞（true/false）
         Map<Long, Boolean> blogIdHasThumbMap = new HashMap<>();
 
-        // 3. 判断：用户已登录（才需要查点赞，没登录直接跳过）
-        if (ObjUtil.isNotEmpty(loginUser)) {
-            List<Object> blogIdList = blogList.stream().map(blog -> blog.getId().toString()).collect(Collectors.toList());
-            // 获取点赞
-            List<Object> thumbList = redisTemplate.opsForHash().multiGet(ThumbConstant.USER_THUMB_KEY_PREFIX + loginUser.getId(), blogIdList);
+        // 3. 用户已登录才查点赞（没登录直接跳过）
+        if (ObjUtil.isNotEmpty(userId)) {
+            List<Object> blogIdStrList = blogList.stream()
+                    .map(blog -> blog.getId().toString())
+                    .collect(Collectors.toList());
+
+            // 从 Redis 批量获取点赞状态
+            List<Object> thumbList = redisTemplate.opsForHash()
+                    .multiGet(ThumbConstant.USER_THUMB_KEY_PREFIX + userId, blogIdStrList);
+
+            // 组装点赞 Map
             for (int i = 0; i < thumbList.size(); i++) {
                 if (thumbList.get(i) == null) {
                     continue;
                 }
-                blogIdHasThumbMap.put(Long.valueOf(blogIdList.get(i).toString()), true);
+                blogIdHasThumbMap.put(Long.valueOf(blogIdStrList.get(i).toString()), true);
             }
         }
-
-
-        // 4. 批量转换：Blog → BlogVO
+        // 4. 批量转换 Blog → BlogVO
         return blogList.stream()
                 .map(blog -> {
-                    // 4.1 拷贝博客所有属性到VO
                     BlogVO blogVO = BeanUtil.copyProperties(blog, BlogVO.class);
-                    // 4.2 从Map中取点赞状态（没查到就是null，前端会识别为false）
+                    // 从 Map 中取点赞状态（没查到就是 null，前端识别为 false）
                     blogVO.setHasThumb(blogIdHasThumbMap.get(blog.getId()));
                     return blogVO;
                 })
                 .toList();
     }
 
-    private BlogVO getBlogVO(Blog blog, User loginUser) {
-        BlogVO blogVO = new BlogVO();
-        BeanUtil.copyProperties(blog, blogVO);
+    /**
+     * 创建博客
+     * @param dto 博客创建参数
+     * @return
+     */
+    @Override
+    public Blog createBlog(BlogCreateDTO dto) {
+            Blog blog = new Blog();
+            BeanUtils.copyProperties(dto, blog);
 
-        // 如果用户没登录，直接返回VO，不用查点赞
-        if (loginUser == null) {
-            return blogVO;
-        }
+            // 从Security上下文获取用户ID（你可以写个SecurityUtil工具类）
+            blog.setUserId(SecurityUtil.getCurrentUserId());
+            blog.setThumbCount(0);
 
-        Boolean exist = thumbService.hasThumb(blog.getId(), loginUser.getId());
-        blogVO.setHasThumb(exist);
+            // 保存到数据库
+            this.save(blog);
 
-
-        return blogVO;
+            // 返回创建的博客ID
+            return blog;
     }
+
+
+
+
 
 }

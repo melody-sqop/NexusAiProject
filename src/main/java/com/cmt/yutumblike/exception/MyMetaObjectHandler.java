@@ -17,17 +17,19 @@ public class MyMetaObjectHandler implements MetaObjectHandler {
      */
     @Override
     public void insertFill(MetaObject metaObject) {
-        // 字段名：createTime
-        // 填充值：当前时间 LocalDateTime.now()
+        // mybatisPlus插入时自动填充当前时间
         this.strictInsertFill(metaObject, "createTime", LocalDateTime::now, LocalDateTime.class);
+        // mybatisPlus插入时自动填充当前时间
+        this.strictInsertFill(metaObject, "updateTime", LocalDateTime::now, LocalDateTime.class);
     }
 
 
 
     /**
-     * 更新数据时（这里不需要，空着就行）
+     * 更新数据时
      */
     @Override
     public void updateFill(MetaObject metaObject) {
+        this.strictUpdateFill(metaObject, "updateTime", LocalDateTime::now, LocalDateTime.class);
     }
 }

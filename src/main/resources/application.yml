@@ -30,9 +30,9 @@ spring:
           min-idle: 50
           max-wait: 3000ms
   datasource:
-    url: jdbc:mysql://192.168.192.130:4000/thumb_db
+    url: jdbc:mysql://localhost:3306/nexus_ai
     username: root
-    password:
+    password: 123456
     hikari:
       maximum-pool-size: 100
       minimum-idle: 20
