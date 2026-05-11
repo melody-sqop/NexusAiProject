@@ -1,3 +1,6 @@
+server:
+  port: 8081
+
 spring:
   # Spring AI 配置 (以阿里云百炼为例，通常兼容 OpenAI 格式)
   ai:
@@ -13,7 +16,6 @@ spring:
   # 自定义审核配置
   audit:
     max-retry-times: 3 # 最大重试次数
-
 
   devtools:
     restart:

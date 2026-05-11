@@ -9,10 +9,10 @@
         <relativePath/>
     </parent>
     <groupId>com.cmt</groupId>
-    <artifactId>ChimiantiaoBlog</artifactId>
+    <artifactId>NexusAiProject</artifactId>
     <version>0.0.1-SNAPSHOT</version>
-    <name>YuTumbLike</name>
-    <description>YuTumbLike</description>
+    <name>NexusAiProject</name>
+    <description>NexusAiProject</description>
 
     <properties>
         <java.version>21</java.version>

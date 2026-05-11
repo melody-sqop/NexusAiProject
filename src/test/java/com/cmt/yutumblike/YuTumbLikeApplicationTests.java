@@ -1,9 +1,9 @@
-//package com.cmt.yutumblike;
+//package com.cmt.NexusAi;
 //
 //import cn.hutool.core.util.RandomUtil;
-//import com.cmt.yutumblike.constant.UserConstant;
-//import com.cmt.yutumblike.model.entity.User;
-//import com.cmt.yutumblike.service.UserService;
+//import com.cmt.NexusAi.constant.UserConstant;
+//import com.cmt.NexusAi.model.entity.User;
+//import com.cmt.NexusAi.service.UserService;
 //import jakarta.annotation.Resource;
 //import org.springframework.http.MediaType;
 //import org.junit.jupiter.api.Test;
@@ -25,7 +25,7 @@
 //@SpringBootTest
 //@AutoConfigureMockMvc
 //@DirtiesContext
-//class YuTumbLikeApplicationTests {
+//class NexusAiApplicationTests {
 //
 //
 //    @Resource
