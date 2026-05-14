@@ -61,28 +61,37 @@ spring:
     timeout: 86400s
     redis:
       serializer-type: json
-  pulsar:
-    producer:
-      batching-enabled: true
-      batching-max-messages: 1000
-      batching-max-publish-delay: 5ms
-      batching-max-size: 131072
-      compression-type: LZ4
-      send-timeout: 5000ms
-    client:
-      service-url: pulsar://192.168.192.130:6650
-    listener:
-      concurrency: 10
+
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
     rewriteBatchedStatements: true
 
+rocketmq:
+  name-server: 192.168.192.130:9876  # 你的Linux服务器IP
+  producer:
+    group: nexus-producer-group
+    send-message-timeout: 3000
+    retry-times-when-send-failed: 2
 
 # 自定义审核配置
 audit:
   max-retry-times: 3 # 最大重试次数
+
+# pulsar配置
+#  pulsar:
+#    producer:
+#      batching-enabled: true
+#      batching-max-messages: 1000
+#      batching-max-publish-delay: 5ms
+#      batching-max-size: 131072
+#      compression-type: LZ4
+#      send-timeout: 5000ms
+#    client:
+#      service-url: pulsar://192.168.192.130:6650
+#    listener:
+#      concurrency: 10
 
 # 整合 Prometheus + Grafana
 #management:

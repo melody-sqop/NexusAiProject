@@ -32,6 +32,8 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -58,6 +60,18 @@ public class UserServiceImpl extends ServiceImpl<UserMapper,User>
 
     @Autowired
     private RoleMapper roleMapper;
+
+
+    @Override
+    public boolean isNewUser(Long userId) {
+        User user = this.getById(userId);
+        if (user == null || user.getRegisterTime() == null) {
+            return false;
+        }
+        // LocalDateTime 可以直接比较
+        return user.getRegisterTime().isAfter(LocalDateTime.now().minusDays(7));
+    }
+
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
@@ -106,7 +120,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper,User>
         user.setPassword(passwordEncoder.encode(password));
         // 邮箱给空字符串，避免数据库报错
         user.setEmail("");
-
+        user.setRegisterTime(LocalDateTime.now());
         boolean saved = this.save(user);
         if (!saved) {
             return ResultUtils.error(500, "注册失败");
@@ -144,6 +158,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper,User>
         user.setPhone("");
 
         boolean saved = this.save(user);
+        user.setRegisterTime(LocalDateTime.now()); // 增加注册时间
         if (!saved) {
             return ResultUtils.error(500, "注册失败");
         }

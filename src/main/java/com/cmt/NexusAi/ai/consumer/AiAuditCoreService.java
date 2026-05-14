@@ -5,37 +5,59 @@ import com.cmt.NexusAi.ai.exception.AiNonRetryableException;
 import com.cmt.NexusAi.ai.exception.AiRetryableException;
 import com.cmt.NexusAi.model.AuditResult;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.networknt.schema.JsonSchema;
+import com.networknt.schema.JsonSchemaFactory;
+import com.networknt.schema.SpecVersion;
+import com.networknt.schema.ValidationMessage;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.pulsar.shade.org.jvnet.hk2.annotations.Service;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.retry.annotation.Retryable;
+import org.springframework.stereotype.Service;
 import org.springframework.web.client.ResourceAccessException;
 
+import java.io.InputStream;
 import java.net.SocketTimeoutException;
+import java.util.Set;
 
-@Service
 @Slf4j
+@Service
 @RequiredArgsConstructor
-public class AiAuditCoreService {  // 核心审核，带重试
+public class AiAuditCoreService {
 
     private final ChatClient.Builder chatClientBuilder;
+    private JsonSchema jsonSchema;
 
     /**
-     * 真正的审核逻辑，带重试
-     * 只有 AiRetryableException 会触发重试
+     * 初始化时加载JSON Schema
+     *
+     * 为什么放在@PostConstruct：服务启动时预加载，避免每次审核都读文件
+     * 不这样做：每次审核都new一个Schema对象，浪费内存和CPU
      */
+    @PostConstruct
+    public void init() {
+        try (InputStream is = getClass().getResourceAsStream("/audit-result-schema.json")) {
+            JsonSchemaFactory factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V201909);
+            jsonSchema = factory.getSchema(is);
+            log.info("[AI审核] JSON Schema加载成功");
+        } catch (Exception e) {
+            log.error("[AI审核] JSON Schema加载失败", e);
+            throw new RuntimeException("JSON Schema加载失败", e);
+        }
+    }
+
     @Retryable(
-            value = {AiRetryableException.class},  // ← 只重试这个异常
+            value = {AiRetryableException.class},
             maxAttempts = 3,
             backoff = @Backoff(delay = 1000, multiplier = 2)
     )
-    public boolean doAudit(String content) {
+    public AuditResult doAudit(String content) {
         log.info("[AI审核] 内容：{}", content);
 
-        // ========== 第1步：调AI ==========
         String raw;
         try {
             raw = chatClientBuilder.build()
@@ -45,19 +67,16 @@ public class AiAuditCoreService {  // 核心审核，带重试
                     .call()
                     .content();
         } catch (Exception e) {
-            // 网络超时、连接失败 → 可重试
             if (isNetworkError(e)) {
                 log.warn("[AI审核] 网络错误，准备重试：{}", e.getMessage());
                 throw new AiRetryableException("AI服务网络异常", e);
             }
-            // 其他异常（如400参数错误）→ 不可重试
             log.error("[AI审核] 调用异常，不重试：{}", e.getMessage());
             throw new AiNonRetryableException("AI调用失败：" + e.getMessage());
         }
 
         log.info("[AI审核] 原始返回：{}", raw);
 
-        // ========== 第2步：清洗 ==========
         String cleaned = clean(raw);
         if (cleaned.isEmpty()) {
             log.warn("[AI审核] 清洗后为空，原始返回：{}", raw);
@@ -65,13 +84,12 @@ public class AiAuditCoreService {  // 核心审核，带重试
         }
         log.info("[AI审核] 清洗后：{}", cleaned);
 
-        // ========== 第3步：Schema校验 ==========
+        // 【核心】JSON Schema校验
         if (!checkSchema(cleaned)) {
             log.warn("[AI审核] Schema校验失败：{}", cleaned);
             throw new AiNonRetryableException("Schema校验失败");
         }
 
-        // ========== 第4步：解析 ==========
         AuditResult result;
         try {
             ObjectMapper mapper = new ObjectMapper();
@@ -82,20 +100,15 @@ public class AiAuditCoreService {  // 核心审核，带重试
             throw new AiNonRetryableException("JSON解析失败");
         }
 
-        // ========== 第5步：业务校验 ==========
         if (result == null || result.isPass() == null || result.action() == null) {
             log.warn("[AI审核] 业务字段缺失：{}", result);
             throw new AiNonRetryableException("业务字段缺失");
         }
 
         log.info("[AI审核] 结果：isPass={}, action={}", result.isPass(), result.action());
-        return Boolean.TRUE.equals(result.isPass());
+        return result;
     }
 
-
-    /**
-     * 判断是否是网络错误（可重试）
-     */
     private boolean isNetworkError(Exception e) {
         return e instanceof SocketTimeoutException
                 || e instanceof ResourceAccessException
@@ -107,40 +120,36 @@ public class AiAuditCoreService {  // 核心审核，带重试
         ));
     }
 
-    // 清洗：只干三件事
     private String clean(String raw) {
         if (raw == null) return "";
-
-        // 1. 去掉 ```json 和 ```
         raw = raw.replace("```json", "").replace("```", "");
-
-        // 2. 去掉前后空格
         raw = raw.trim();
-
-        // 3. 只保留 { 到 } 之间的内容
         int start = raw.indexOf('{');
         int end = raw.lastIndexOf('}');
         if (start == -1 || end == -1 || end <= start) return "";
-
         return raw.substring(start, end + 1);
     }
 
-    // Schema校验：只检查三个东西
+    /**
+     * JSON Schema校验（替换原来的字符串包含判断）
+     *
+     * 为什么要用Schema：精确校验字段类型、枚举值、条件逻辑
+     * 不这样做：模型返回 {"isPass":true, "action":"block"} 这种矛盾数据，业务逻辑会崩溃
+     */
     private boolean checkSchema(String json) {
-        // 1. 是不是合法JSON
         try {
-            new ObjectMapper().readTree(json);
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode jsonNode = mapper.readTree(json);
+
+            Set<ValidationMessage> errors = jsonSchema.validate(jsonNode);
+            if (!errors.isEmpty()) {
+                log.warn("[AI审核] Schema校验错误：{}", errors);
+                return false;
+            }
+            return true;
         } catch (Exception e) {
+            log.error("[AI审核] Schema校验异常", e);
             return false;
         }
-
-        // 2. 有没有 isPass
-        if (!json.contains("\"isPass\"")) return false;
-
-        // 3. 有没有 action，且值对不对
-        if (!json.contains("\"action\"")) return false;
-
-        return true;
     }
 }
-

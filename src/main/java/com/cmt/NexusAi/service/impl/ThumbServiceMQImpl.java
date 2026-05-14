@@ -12,10 +12,13 @@ import com.cmt.NexusAi.service.ThumbService;
 import com.cmt.NexusAi.service.UserService;
 import com.cmt.NexusAi.util.RedisKeyUtil;
 import jakarta.servlet.http.HttpServletRequest;
+import org.apache.rocketmq.client.producer.SendResult;
+import org.apache.rocketmq.client.producer.SendCallback;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.rocketmq.spring.core.RocketMQTemplate;
 import org.springframework.data.redis.core.RedisTemplate;
-import org.springframework.pulsar.core.PulsarTemplate;
+import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
@@ -29,11 +32,12 @@ import java.util.List;
 public class ThumbServiceMQImpl extends ServiceImpl<ThumbMapper, Thumb>
         implements ThumbService {
 
-    private final UserService userService;
 
     private final RedisTemplate<String, Object> redisTemplate;
 
-    private final PulsarTemplate<ThumbEvent> pulsarTemplate;
+    private final RocketMQTemplate rocketMQTemplate;
+
+
 
     @Override
     public Boolean doThumb(DoThumbRequest doThumbRequest, HttpServletRequest request) {
@@ -62,10 +66,16 @@ public class ThumbServiceMQImpl extends ServiceImpl<ThumbMapper, Thumb>
                 .build();
 
         // 发送点赞事件 不管有没有发送成功直接返回成功  兜底机制：回滚redis点赞记录
-        pulsarTemplate.sendAsync("thumb-topic", thumbEvent).exceptionally(ex -> {
-            redisTemplate.opsForHash().delete(userThumbKey, blogId.toString(), true);
-            log.error("点赞事件发送失败: userId={}, blogId={}", loginUserId, blogId, ex);
-            return null;
+        rocketMQTemplate.asyncSend("thumb-topic", thumbEvent, new SendCallback() {
+            @Override
+            public void onSuccess(SendResult sendResult) {
+                log.info("点赞事件发送成功");
+            }
+            @Override
+            public void onException(Throwable e) {
+                redisTemplate.opsForHash().delete(userThumbKey, blogId.toString());
+                log.error("点赞事件发送失败", e);
+            }
         });
 
         return true;
@@ -76,8 +86,8 @@ public class ThumbServiceMQImpl extends ServiceImpl<ThumbMapper, Thumb>
         if (doThumbRequest == null || doThumbRequest.getBlogId() == null) {
             throw new RuntimeException("参数错误");
         }
-        User loginUser = userService.getLoginUser(request);
-        Long loginUserId = loginUser.getId();
+        Long loginUserId = (Long) SecurityContextHolder.getContext()
+                .getAuthentication().getPrincipal();
         Long blogId = doThumbRequest.getBlogId();
         String userThumbKey = RedisKeyUtil.getUserThumbKey(loginUserId);
         // 执行 Lua 脚本，点赞记录从 Redis 删除
@@ -97,11 +107,20 @@ public class ThumbServiceMQImpl extends ServiceImpl<ThumbMapper, Thumb>
                 .build();
 
         // 发送点赞事件 不管有没有发送成功直接返回成功  兜底机制：回滚redis点赞记录
-        pulsarTemplate.sendAsync("thumb-topic", thumbEvent).exceptionally(ex -> {
-            redisTemplate.opsForHash().put(userThumbKey, blogId.toString(), true);
-            log.error("点赞事件发送失败: userId={}, blogId={}", loginUserId, blogId, ex);
-            return null;
-        });
+        rocketMQTemplate.asyncSend("thumb-topic",
+                MessageBuilder.withPayload(thumbEvent).build(),
+                new SendCallback() {
+                    @Override
+                    public void onSuccess(SendResult sendResult) {
+                        log.info("取消点赞事件发送成功");
+                    }
+                    @Override
+                    public void onException(Throwable e) {
+                        redisTemplate.opsForHash().put(userThumbKey, blogId.toString(), true);
+                        log.error("取消点赞事件发送失败: userId={}, blogId={}", loginUserId, blogId, e);
+                    }
+                }
+        );
 
         return true;
     }

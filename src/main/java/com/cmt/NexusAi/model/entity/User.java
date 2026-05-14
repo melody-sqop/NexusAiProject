@@ -7,6 +7,8 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import lombok.Data;
 
 import java.io.Serializable;
+import java.time.LocalDateTime;
+import java.util.Date;
 
 @Data
 @TableName("user")
@@ -29,4 +31,6 @@ public class User implements Serializable {
     @Schema(description = "密码",example = "123456")
     private String password;
 
+    @Schema(description = "注册时间")
+    private LocalDateTime registerTime;  // 注册时间
 }

@@ -35,7 +35,12 @@ public class Comment implements Serializable {
     private String content;
 
     /**
-     * 审核状态：0-待审核 1-通过 2-驳回 3-人工复核
+     * 审核状态：
+     * 0-待审核
+     * 1-通过 
+     * 2-驳回
+     * 3-人工复核
+     * 4-审核中（MQ已消费，正在调AI）
      */
     private Integer auditStatus;
 
