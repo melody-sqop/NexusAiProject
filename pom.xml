@@ -74,7 +74,7 @@
             <version>1.0.86</version>
         </dependency>
 
-<!--        基于DFA算法实现敏感词过滤-->
+<!--        基于DFA算法实现敏感词过滤依赖-->
         <dependency>
             <groupId>org.ahocorasick</groupId>
             <artifactId>ahocorasick</artifactId>
