@@ -88,6 +88,12 @@
             <version>2.3.0</version>
         </dependency>
 
+        <dependency>
+            <groupId>com.github.magese</groupId>
+            <artifactId>ik-analyzer</artifactId>
+            <version>8.5.0</version>
+        </dependency>
+
 
         <!-- knife4j 接口文档 -->
         <dependency>

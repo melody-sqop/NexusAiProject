@@ -1,9 +1,9 @@
 //package com.cmt.NexusAi;
 //
 //import cn.hutool.core.util.RandomUtil;
-//import com.cmt.NexusAi.constant.UserConstant;
-//import com.cmt.NexusAi.model.entity.User;
-//import com.cmt.NexusAi.service.UserService;
+//import com.cmt.NexusAi.modules.security.constant.UserConstant;
+//import com.cmt.NexusAi.modules.user.model.entity.User;
+//import com.cmt.NexusAi.modules.user.service.UserService;
 //import jakarta.annotation.Resource;
 //import org.springframework.http.MediaType;
 //import org.junit.jupiter.api.Test;

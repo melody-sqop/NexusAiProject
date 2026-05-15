@@ -1,6 +1,5 @@
 server:
   port: 8081
-
 spring:
   # Spring AI 配置 (以阿里云百炼为例，通常兼容 OpenAI 格式)
   ai:
@@ -75,33 +74,11 @@ rocketmq:
     send-message-timeout: 3000
     retry-times-when-send-failed: 2
 
-# 自定义审核配置
+# 审核渐进式配置（改这里控制上线节奏，不用改代码）
 audit:
-  max-retry-times: 3 # 最大重试次数
-
-# pulsar配置
-#  pulsar:
-#    producer:
-#      batching-enabled: true
-#      batching-max-messages: 1000
-#      batching-max-publish-delay: 5ms
-#      batching-max-size: 131072
-#      compression-type: LZ4
-#      send-timeout: 5000ms
-#    client:
-#      service-url: pulsar://192.168.192.130:6650
-#    listener:
-#      concurrency: 10
-
-# 整合 Prometheus + Grafana
-#management:
-#  endpoints:
-#    web:
-#      exposure:
-#        include: health, prometheus
-#  metrics:
-#    distribution:
-#      percentiles:
-#        http:
-#          server:
-#            requests: 0.5, 0.75, 0.9, 0.95, 0.99
+  sampling:
+    rate: 30        # 采样率：第1周30，第2周20，稳定后5
+  shadow:
+    mode: true      # true=影子模式（只记录），false=正式复用
+  simhash:
+    threshold: 2    # 海明距离阈值：2=严格，3=宽松
