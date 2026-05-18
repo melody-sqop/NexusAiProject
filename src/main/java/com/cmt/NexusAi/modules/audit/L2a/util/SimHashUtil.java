@@ -4,45 +4,38 @@ import java.util.List;
 
 public class SimHashUtil {
 
-    public static long compute(String text) {
-        List<String> words = IkTokenizerUtil.segment(text);
-        int[] score = new int[64];
+    private static final int HASH_BITS = 64;
 
-        for (String word : words) {
-            if (word == null || word.trim().isEmpty()) continue;
+    public static long computeSimHash(String text) {
+        if (text == null || text.trim().isEmpty()) {
+            return 0L;
+        }
 
-            long hash = MurmurHash3Util.hash64(word);
-            int weight = 1; // 生产环境可接TF-IDF提升关键词权重
+        List<String> tokens = IkTokenizerUtil.tokenize(text);
+        if (tokens == null || tokens.isEmpty()) {
+            return 0L;
+        }
 
-            for (int i = 0; i < 64; i++) {
-                long bit = (hash >> i) & 1L;
-                if (bit == 1) {
-                    score[i] += weight;
-                } else {
-                    score[i] -= weight;
-                }
+        int[] weights = new int[HASH_BITS];
+
+        for (String token : tokens) {
+            long hash = MurmurHash3Util.hash64(token);
+            for (int i = 0; i < HASH_BITS; i++) {
+                long bit = (hash >>> i) & 1L;
+                weights[i] += (bit == 1L) ? 1 : -1;
             }
         }
 
         long simHash = 0L;
-        for (int i = 0; i < 64; i++) {
-            if (score[i] > 0) {
+        for (int i = 0; i < HASH_BITS; i++) {
+            if (weights[i] > 0) {
                 simHash |= (1L << i);
             }
         }
         return simHash;
     }
 
-    public static int hammingDistance(long a, long b) {
-        return Long.bitCount(a ^ b);
-    }
-
-    public static int[] split4(long simHash) {
-        int[] s = new int[4];
-        s[0] = (int) (simHash & 0xFFFFL);
-        s[1] = (int) ((simHash >> 16) & 0xFFFFL);
-        s[2] = (int) ((simHash >> 32) & 0xFFFFL);
-        s[3] = (int) ((simHash >> 48) & 0xFFFFL);
-        return s;
+    public static int hammingDistance(long hash1, long hash2) {
+        return Long.bitCount(hash1 ^ hash2);
     }
 }

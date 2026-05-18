@@ -9,6 +9,7 @@ import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.ahocorasick.trie.Emit;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -18,6 +19,7 @@ import java.util.stream.Collectors;
 
 @Component
 @Slf4j
+@Lazy
 public class ContentAuditor {
 
     @Autowired

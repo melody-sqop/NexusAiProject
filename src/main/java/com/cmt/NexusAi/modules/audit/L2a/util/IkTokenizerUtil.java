@@ -9,17 +9,30 @@ import java.util.List;
 
 public class IkTokenizerUtil {
 
-    public static List<String> segment(String text) {
-        List<String> words = new ArrayList<>();
-        try {
-            IKSegmenter ik = new IKSegmenter(new StringReader(text), true);
+    /**
+     * IK智能分词
+     */
+    public static List<String> tokenize(String text) {
+        List<String> tokens = new ArrayList<>();
+        if (text == null || text.trim().isEmpty()) {
+            return tokens;
+        }
+
+        try (StringReader reader = new StringReader(text)) {
+            IKSegmenter ik = new IKSegmenter(reader, true); // true=智能分词模式
             Lexeme lexeme;
             while ((lexeme = ik.next()) != null) {
-                words.add(lexeme.getLexemeText());
+                tokens.add(lexeme.getLexemeText());
             }
         } catch (Exception e) {
-            throw new RuntimeException("IK分词失败: " + text, e);
+            // 降级：按字切分
+            for (char c : text.toCharArray()) {
+                if (Character.isLetterOrDigit(c)) {
+                    tokens.add(String.valueOf(c));
+                }
+            }
         }
-        return words;
+
+        return tokens;
     }
 }

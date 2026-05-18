@@ -1,93 +1,190 @@
 package com.cmt.NexusAi.modules.audit.L2a.service;
 
-import com.cmt.NexusAi.modules.audit.L2b.model.DTO.AuditResultDTO;
-import com.cmt.NexusAi.modules.audit.L2b.enums.RiskLevel;
 import com.cmt.NexusAi.modules.audit.L2a.util.SimHashUtil;
-import com.cmt.NexusAi.modules.audit.L2b.model.vo.AuditResult;
-import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import com.cmt.NexusAi.modules.audit.L2a.entity.SimHashResult;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
-import java.util.concurrent.TimeUnit;
 
 @Slf4j
 @Service
 public class SimHashCacheService {
 
+    private static final String PREFIX = "simhash:";
+    private static final long TTL_HOURS = 24;
+    private static final int THRESHOLD = 3;
+    private static final int SEGMENTS = 4;
+    private static final int BITS_PER_SEGMENT = 16;
+    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+
     @Autowired
-    private StringRedisTemplate redis;
+    private StringRedisTemplate redisTemplate;
+    @Autowired
+    private ObjectMapper objectMapper;
 
-    private final ObjectMapper mapper = new ObjectMapper();
-
-    /**
-     * 写入缓存。只存违规内容（P1/P2/P3），P4正常和P0涉政不存。
-     */
-    public void cache(String content, AuditResultDTO result) {
-        if (result.getLevel() == RiskLevel.CRITICAL || result.getLevel() == RiskLevel.SAFE) {
-            return;
-        }
-
-        long hash = SimHashUtil.compute(content);
-        int[] segs = SimHashUtil.split4(hash);
-
-        String mainKey = "simhash:feature:" + hash;
-        try {
-            redis.opsForValue().set(mainKey, mapper.writeValueAsString(result), 24, TimeUnit.HOURS);
-        } catch (JsonProcessingException e) {
-            log.error("SimHash缓存序列化失败", e);
-            return;
-        }
-
-        for (int i = 0; i < 4; i++) {
-            String bucketKey = "simhash:bucket:" + i + ":" + segs[i];
-            redis.opsForSet().add(bucketKey, String.valueOf(hash));
-        }
+    public SimHashResult query(String text) {
+        return findSimilar(text);
     }
 
     /**
-     * 查询缓存。threshold=2 表示最多允许2位不同。
+     * 写入 SimHash 缓存
+     * 仅缓存 REJECT（明确违规），P0涉政/灰色地带/REVIEW 均跳过
      */
-    public AuditResult query(String content, int threshold) {
-        long hash = SimHashUtil.compute(content);
-        int[] segs = SimHashUtil.split4(hash);
-
-        Set<String> candidates = new HashSet<>();
-        for (int i = 0; i < 4; i++) {
-            String bucketKey = "simhash:bucket:" + i + ":" + segs[i];
-            Set<String> list = redis.opsForSet().members(bucketKey);
-            if (list != null) candidates.addAll(list);
+    public void cache(String text, String violationTag, String auditSource,
+                      String auditResult, String auditComment) {
+        // P0 涉政：红线，不走 SimHash 缓存
+        if ("P0_BLACKLIST".equals(violationTag)) {
+            log.warn("[SimHash] P0涉政跳过 | text={}", truncate(text, 30));
+            return;
         }
 
-        int minDist = Integer.MAX_VALUE;
-        String bestHash = null;
-
-        for (String cand : candidates) {
-            long c = Long.parseLong(cand);
-            int dist = SimHashUtil.hammingDistance(hash, c);
-            if (dist < minDist) {
-                minDist = dist;
-                bestHash = cand;
-            }
+        // 仅缓存明确违规（REJECT）
+        if (!"REJECT".equals(auditResult)) {
+            log.debug("[SimHash] 非REJECT跳过 | result={} | text={}", auditResult, truncate(text, 30));
+            return;
         }
-
-        if (minDist > threshold || bestHash == null) {
-            return null;
-        }
-
-        String mainKey = "simhash:feature:" + bestHash;
-        String json = redis.opsForValue().get(mainKey);
-        if (json == null || json.isEmpty()) return null;
 
         try {
-            return mapper.readValue(json, AuditResult.class);
-        } catch (JsonProcessingException e) {
-            log.error("SimHash缓存反序列化失败", e);
+            long simHash = SimHashUtil.computeSimHash(text);
+
+            List<String> segmentKeys = new ArrayList<>(SEGMENTS);
+            for (int i = 0; i < SEGMENTS; i++) {
+                segmentKeys.add(String.valueOf(extractSegment(simHash, i)));
+            }
+
+            SimHashResult result = SimHashResult.builder()
+                    .simHash(simHash)
+                    .segmentKeys(segmentKeys)
+                    .violationTag(violationTag)  // ← 改：直接存标签
+                    .auditSource(auditSource)
+                    .auditResult(auditResult)
+                    .auditComment(auditComment)
+                    .sampleText(truncate(text, 100))
+                    .createTime(LocalDateTime.now().format(TIME_FMT))
+                    .build();
+
+            for (int i = 0; i < SEGMENTS; i++) {
+                long segment = extractSegment(simHash, i);
+                String bucketKey = buildSegmentKey(i, segment);
+                redisTemplate.opsForSet().add(bucketKey, String.valueOf(simHash));
+                redisTemplate.expire(bucketKey, Duration.ofHours(TTL_HOURS));
+            }
+
+            String detailKey = buildDetailKey(simHash);
+            String json = objectMapper.writeValueAsString(result);
+            redisTemplate.opsForValue().set(detailKey, json, Duration.ofHours(TTL_HOURS));
+
+            log.info("[SimHash] 写入 | hash={} | source={} | result={} | tag={} | seg={}~{}",
+                    simHash, auditSource, auditResult, violationTag, segmentKeys.get(0), segmentKeys.get(3));
+
+        } catch (Exception e) {
+            log.error("[SimHash] 写入异常 | text={}", truncate(text, 50), e);
+        }
+    }
+
+    public void remove(long simHash) {
+        for (int i = 0; i < SEGMENTS; i++) {
+            long segment = extractSegment(simHash, i);
+            String bucketKey = buildSegmentKey(i, segment);
+            redisTemplate.opsForSet().remove(bucketKey, String.valueOf(simHash));
+        }
+        redisTemplate.delete(buildDetailKey(simHash));
+        log.info("[SimHash] 删除 | hash={}", simHash);
+    }
+
+    // ========== 内部方法（以下不变） ==========
+
+    private SimHashResult findSimilar(String text) {
+        try {
+            long simHash = SimHashUtil.computeSimHash(text);
+            Set<String> candidates = new HashSet<>();
+            for (int i = 0; i < SEGMENTS; i++) {
+                long segment = extractSegment(simHash, i);
+                String bucketKey = buildSegmentKey(i, segment);
+                Set<String> members = redisTemplate.opsForSet().members(bucketKey);
+                if (members != null && !members.isEmpty()) {
+                    candidates.addAll(members);
+                }
+            }
+
+            if (candidates.isEmpty()) return null;
+
+            SimHashResult best = null;
+            int minDist = Integer.MAX_VALUE;
+
+            for (String hashStr : candidates) {
+                try {
+                    long cachedHash = Long.parseLong(hashStr);
+                    String json = redisTemplate.opsForValue().get(buildDetailKey(cachedHash));
+                    if (json == null) continue;
+
+                    JsonNode node = objectMapper.readTree(json);
+                    SimHashResult candidate = objectMapper.treeToValue(node, SimHashResult.class);
+
+                    // 旧数据兼容
+                    if (candidate.getAuditSource() == null && node.has("aiReason")) {
+                        String aiReason = node.get("aiReason").asText();
+                        candidate.setAuditSource(aiReason.contains("AI终审") ? "AI_AUDIT" : "UNKNOWN");
+                        candidate.setAuditResult(aiReason.contains("：")
+                                ? aiReason.split("：")[1].toUpperCase()
+                                : "REVIEW");
+                        candidate.setAuditComment(aiReason);
+                    }
+
+                    if (!candidate.isValid()) {
+                        log.debug("[SimHash] 过期跳过 | hash={}", cachedHash);
+                        continue;
+                    }
+
+                    int dist = SimHashUtil.hammingDistance(simHash, cachedHash);
+                    if (dist < THRESHOLD && dist < minDist) {
+                        minDist = dist;
+                        best = candidate;
+                    }
+                } catch (Exception e) {
+                    log.warn("[SimHash] 候选异常 | hashStr={}", hashStr, e);
+                }
+            }
+
+            if (best != null) {
+                best.setMatchDistance(minDist);
+                log.info("[SimHash] 命中 | hash={} | dist={} | source={} | result={}",
+                        best.getSimHash(), minDist, best.getAuditSource(), best.getAuditResult());
+            }
+            return best;
+
+        } catch (Exception e) {
+            log.error("[SimHash] 查询异常 | text={}", truncate(text, 50), e);
             return null;
         }
+    }
+
+    private long extractSegment(long simHash, int segmentIndex) {
+        int shift = segmentIndex * BITS_PER_SEGMENT;
+        return (simHash >>> shift) & 0xFFFFL;
+    }
+
+    private String buildSegmentKey(int segmentIndex, long segmentValue) {
+        return PREFIX + "seg:" + segmentIndex + ":" + segmentValue;
+    }
+
+    private String buildDetailKey(long simHash) {
+        return PREFIX + "detail:" + simHash;
+    }
+
+    private String truncate(String text, int maxLen) {
+        if (text == null) return "";
+        return text.length() <= maxLen ? text : text.substring(0, maxLen) + "...";
     }
 }
