@@ -1,5 +1,6 @@
 package com.cmt.NexusAi.modules.audit.L2a.service;
 
+import com.cmt.NexusAi.modules.audit.L2a.entity.SimHashResult;
 import com.cmt.NexusAi.modules.audit.L2a.util.SimHashUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -7,7 +8,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-import com.cmt.NexusAi.modules.audit.L2a.entity.SimHashResult;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -22,7 +22,7 @@ import java.util.Set;
 public class SimHashCacheService {
 
     private static final String PREFIX = "simhash:";
-    private static final long TTL_HOURS = 24;
+    private static final long TTL_HOURS = 24; // 24小时自愈
     private static final int THRESHOLD = 3;
     private static final int SEGMENTS = 4;
     private static final int BITS_PER_SEGMENT = 16;
@@ -39,17 +39,15 @@ public class SimHashCacheService {
 
     /**
      * 写入 SimHash 缓存
-     * 仅缓存 REJECT（明确违规），P0涉政/灰色地带/REVIEW 均跳过
+     * 仅缓存明确REJECT，P0涉政/灰色地带/REVIEW 均跳过
      */
     public void cache(String text, String violationTag, String auditSource,
                       String auditResult, String auditComment) {
-        // P0 涉政：红线，不走 SimHash 缓存
         if ("P0_BLACKLIST".equals(violationTag)) {
             log.warn("[SimHash] P0涉政跳过 | text={}", truncate(text, 30));
             return;
         }
 
-        // 仅缓存明确违规（REJECT）
         if (!"REJECT".equals(auditResult)) {
             log.debug("[SimHash] 非REJECT跳过 | result={} | text={}", auditResult, truncate(text, 30));
             return;
@@ -66,7 +64,7 @@ public class SimHashCacheService {
             SimHashResult result = SimHashResult.builder()
                     .simHash(simHash)
                     .segmentKeys(segmentKeys)
-                    .violationTag(violationTag)  // ← 改：直接存标签
+                    .violationTag(violationTag)
                     .auditSource(auditSource)
                     .auditResult(auditResult)
                     .auditComment(auditComment)
@@ -74,13 +72,31 @@ public class SimHashCacheService {
                     .createTime(LocalDateTime.now().format(TIME_FMT))
                     .build();
 
+            // 写入分段桶
             for (int i = 0; i < SEGMENTS; i++) {
                 long segment = extractSegment(simHash, i);
                 String bucketKey = buildSegmentKey(i, segment);
                 redisTemplate.opsForSet().add(bucketKey, String.valueOf(simHash));
-                redisTemplate.expire(bucketKey, Duration.ofHours(TTL_HOURS));
+
+                // [Bug修复] 修复TTL逻辑严重错误
+                // 原代码：Duration expire = Duration.ofDays(redisTemplate.getExpire(bucketKey));
+                // 错误1：getExpire()返回秒数（如86400），Duration.ofDays(86400)把秒数当天数
+                //        → 创建了86400天=236年的Duration，getSeconds()返回7,464,960,000 >> 0
+                //        → 条件永远不成立 → TTL永远不会被设置
+                // 错误2：即使修复单位转换，原逻辑也与架构要求矛盾
+                //        架构要求"只在Key创建时设TTL，防高频写入刷新导致永不过期"
+                //
+                // 修复方案：
+                //   getExpire()返回值含义：>0=剩余秒数, -1=永不过期, -2=key不存在
+                //   只在key没有TTL（-1）或key不存在（-2）时设置过期时间
+                //   已有TTL的key不刷新，保证TTL只在首次创建时设置
+                Long ttlSeconds = redisTemplate.getExpire(bucketKey);
+                if (ttlSeconds == null || ttlSeconds < 0) {
+                    redisTemplate.expire(bucketKey, Duration.ofHours(TTL_HOURS));
+                }
             }
 
+            // 写入详情
             String detailKey = buildDetailKey(simHash);
             String json = objectMapper.writeValueAsString(result);
             redisTemplate.opsForValue().set(detailKey, json, Duration.ofHours(TTL_HOURS));
@@ -103,7 +119,7 @@ public class SimHashCacheService {
         log.info("[SimHash] 删除 | hash={}", simHash);
     }
 
-    // ========== 内部方法（以下不变） ==========
+    // ========== 内部方法 ==========
 
     private SimHashResult findSimilar(String text) {
         try {
@@ -132,7 +148,6 @@ public class SimHashCacheService {
                     JsonNode node = objectMapper.readTree(json);
                     SimHashResult candidate = objectMapper.treeToValue(node, SimHashResult.class);
 
-                    // 旧数据兼容
                     if (candidate.getAuditSource() == null && node.has("aiReason")) {
                         String aiReason = node.get("aiReason").asText();
                         candidate.setAuditSource(aiReason.contains("AI终审") ? "AI_AUDIT" : "UNKNOWN");

@@ -49,11 +49,11 @@ public class ContentAuditor {
 
         List<SensitiveWord> words = sensitiveWordMapper.selectAllEnabled();
         trieHolder.build(words);
-        System.out.println("[ContentAuditor] trie 树重建完成，敏感词数量：" + words.size());
-
 
         long cost = System.currentTimeMillis() - start;
-        // 构建成功日志
+
+        // [Bug修复] 移除System.out.println，替换为log.info
+        // 原因：System.out底层有synchronized锁，高并发下争抢锁导致RT抖动
         log.info("[SENSITIVE-TRIE] trie树重建完成 | 词库数量={} | 构建耗时={}ms | 线程={}",
                 words.size(), cost, Thread.currentThread().getName());
 
@@ -62,7 +62,6 @@ public class ContentAuditor {
                 log.debug("[SENSITIVE-TRIE] 抽样词库 | word={} | riskLevel={} | category={}",
                         w.getWord(), w.getRiskLevel(), w.getCategory())
         );
-
     }
 
     /**
@@ -78,7 +77,6 @@ public class ContentAuditor {
 
         long start = System.currentTimeMillis();
 
-
         // Step 1: 标准化（去符号、谐音替换）
         String normalized = textNormalizer.removeNoise(text);
 
@@ -90,14 +88,12 @@ public class ContentAuditor {
         for (Emit emit : emits) {
             SensitiveWord meta = trieHolder.getMeta(emit.getKeyword());
 
-
+            // [Bug修复] 合并重复的null检查，移除永远不会执行的第二个if
+            // 原因：第一个if已经continue，第二个if永远不会被执行，属于死代码
             if (meta == null) {
                 log.warn("[SENSITIVE-MATCH] 命中词在元数据中不存在 | keyword={}", emit.getKeyword());
                 continue;
             }
-
-
-            if (meta == null) continue;  // 防御性编程
 
             HitResult hit = new HitResult();
             hit.setStart(emit.getStart());
@@ -109,7 +105,6 @@ public class ContentAuditor {
 
             log.info("[SENSITIVE-MATCH] 命中敏感词 | word={} | riskLevel={} | category={} | pos=[{},{}]",
                     meta.getWord(), meta.getRiskLevel(), meta.getCategory(), emit.getStart(), emit.getEnd());
-
         }
 
         long cost = System.currentTimeMillis() - start;
@@ -121,7 +116,6 @@ public class ContentAuditor {
                     results.size(), text.length(), cost,
                     results.stream().map(HitResult::getRiskLevel).collect(Collectors.toList()));
         }
-
 
         return results;
     }

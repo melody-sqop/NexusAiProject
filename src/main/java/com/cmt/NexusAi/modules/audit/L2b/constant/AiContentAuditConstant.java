@@ -5,7 +5,8 @@ public interface AiContentAuditConstant {
     int PASSED = 1; // 通过
     int REJECTED = 2; // 违规驳回
     int MANUAL_REVIEW = 3;  // AI调用失败/异常
-    int AUDITING = 4;       // 审核中（MQ已消费，正在调AI）← 新增
+    int AUDITING = 4;       // 审核中（MQ已消费，正在调AI）
+
     /**
      * ai审核系统提示
      */
@@ -39,10 +40,14 @@ public interface AiContentAuditConstant {
 
     /**
      * ai审核主题
+     * [Bug修复] 移除接口中冗余的 public static final 修饰符
+     * 原因：Java接口中的字段默认就是 public static final，显式写出是冗余的，
+     *       容易让不熟悉Java的开发者误以为接口字段可以是非public/non-static/non-final的
      */
-    public static final String AUDIT_TOPIC = "comment-audit-topic";
+    String AUDIT_TOPIC = "comment-audit-topic";
+
     /**
      * 人工审核通知主题
      */
-    public static final String MANUAL_NOTIFY_TOPIC = "manual-audit-notify-topic";
+    String MANUAL_NOTIFY_TOPIC = "manual-audit-notify-topic";
 }

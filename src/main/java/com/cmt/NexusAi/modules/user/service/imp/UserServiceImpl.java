@@ -71,6 +71,11 @@ public class UserServiceImpl extends ServiceImpl<UserMapper,User>
         return user.getRegisterTime().isAfter(LocalDateTime.now().minusDays(7));
     }
 
+    @Override
+    public String getUserNameById(Long senderId) {
+        return this.getById(senderId).getUsername();
+    }
+
 
     @Override
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {

@@ -40,13 +40,16 @@ public class ShadowAuditService {
         try {
             ShadowLog shadowLog = new ShadowLog();
             shadowLog.setContent(content.substring(0, Math.min(200, content.length())));
-            // 改：RiskLevel.SAFE(0) → "PASS"，与 violation_tag 体系对齐
             shadowLog.setCachedLevel("PASS");
             shadowLog.setAiLevel(String.valueOf(aiLevel));
             shadowLog.setDistance(distance);
             shadowLog.setIsDiff(isDiff ? 1 : 0);
             shadowLogMapper.insert(shadowLog);
-            System.out.println("[影子日志] 记录成功 | aiLevel=" + aiLevel + " | isDiff=" + isDiff);
+
+            // [Bug修复] 移除System.out.println，替换为log.debug
+            // 原因：System.out底层有synchronized锁，高并发下争抢锁导致RT抖动；
+            // 影子日志属于调试信息，应使用debug级别，生产环境默认不输出
+            log.debug("[影子日志] 记录成功 | aiLevel={} | isDiff={}", aiLevel, isDiff);
         } catch (Exception e) {
             log.error("[影子日志] 记录失败", e);
         }

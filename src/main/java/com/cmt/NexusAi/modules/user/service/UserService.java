@@ -27,4 +27,7 @@ public interface UserService extends IService<User>, UserDetailsService {
     BaseResponse<Map<String, Object>> loginUser(User user);
 
     boolean isNewUser(Long userId);
+
+    String getUserNameById(Long senderId);
+
 }
